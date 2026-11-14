@@ -10,8 +10,17 @@ permissions:
 
 jobs:
   proxy-servers:
-    runs-on: macos-15-intel
+    runs-on: macos-latest
     timeout-minutes: 90
+    env:
+      # macos-latest is an Apple Silicon runner on the current GitHub image;
+      # keep the expressions architecture-aware so a label migration back to
+      # Intel still produces an emulator-compatible APK instead of an adb
+      # device that cannot execute the native library.
+      TARGET_ABI: ${{ runner.arch == 'ARM64' && 'arm64' || 'x86_64' }}
+      EMULATOR_ARCH: ${{ runner.arch == 'ARM64' && 'arm64-v8a' || 'x86_64' }}
+      RUST_ANDROID_TARGET: ${{ runner.arch == 'ARM64' && 'aarch64-linux-android' || 'x86_64-linux-android' }}
+      SS_TARGET: ${{ runner.arch == 'ARM64' && 'aarch64-apple-darwin' || 'x86_64-apple-darwin' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -25,9 +34,7 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          # macos-15-intel is an Intel host. Build the x86_64 ABI that its emulator
-          # can execute natively with the host hypervisor.
-          targets: x86_64-linux-android
+          targets: ${{ env.RUST_ANDROID_TARGET }}
 
       - name: Cargo cache
         uses: actions/cache@v4
@@ -37,14 +44,14 @@ jobs:
             ~/.cargo/git
             ~/.cargo/bin/cargo-ndk
             core/src/main/rust/meow-android-ffi/target
-          key: cargo-${{ runner.os }}-x86_64-screenshot-${{ hashFiles('core/src/main/rust/**/Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-x86_64-screenshot-
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-screenshot-${{ hashFiles('core/src/main/rust/**/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-screenshot-
 
       - name: Install Android NDK
         run: |
           echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             "emulator" "platform-tools" "platforms;android-35" \
-            "system-images;android-35;google_apis;x86_64" \
+            "system-images;android-35;google_apis;$EMULATOR_ARCH" \
             "ndk;28.2.13676358" "ndk;27.0.12077973"
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
@@ -53,7 +60,6 @@ jobs:
           command -v cargo-ndk || cargo install cargo-ndk
           SS_VERSION=1.25.0
           mkdir -p "$HOME/.cargo/bin"
-          SS_TARGET="x86_64-apple-darwin"
           curl -fsSL "https://github.com/shadowsocks/shadowsocks-rust/releases/download/v${SS_VERSION}/shadowsocks-v${SS_VERSION}.${SS_TARGET}.tar.xz" \
             | tar -xJ -C "$HOME/.cargo/bin" ssserver
           chmod +x "$HOME/.cargo/bin/ssserver"
@@ -62,13 +68,12 @@ jobs:
       - name: Gradle cache
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Build x86_64 debug APK for the emulator
-        run: ./gradlew :mobile:assembleDebug -PTARGET_ABI=x86_64 -PCARGO_PROFILE=debug
+      - name: Build debug APK for the emulator ABI
+        run: ./gradlew :mobile:assembleDebug -PTARGET_ABI="$TARGET_ABI" -PCARGO_PROFILE=debug
 
       - name: Boot emulator and capture Proxy Servers
         uses: reactivecircus/android-emulator-runner@v2
         env:
-          # The Intel runner supports the normal hardware-accelerated path.
           # Start a fresh adb daemon because this runner image can leave a
           # stale daemon behind before the action launches the emulator.
           ANDROID_I_WANT_MY_TCG: no
@@ -80,11 +85,11 @@ jobs:
         with:
           api-level: 35
           target: google_apis
-          arch: x86_64
+          arch: ${{ env.EMULATOR_ARCH }}
           profile: pixel_2
-          # A cold x86_64 Android 35 boot on the hosted Intel runner can stay
-          # offline for several minutes while the userdata image initializes.
-          # Avoid snapshot probing and allow enough time for the first boot.
+          # A cold Android 35 boot can stay offline for several minutes while
+          # the userdata image initializes. Avoid snapshot probing and allow
+          # enough time for the first boot.
           emulator-options: >-
             -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
             -no-snapshot -accel on

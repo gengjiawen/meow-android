@@ -681,6 +681,54 @@ internal fun parseProxyEntry(yaml: String, name: String): ParsedProxyEntry? {
     return ParsedProxyEntry(type, fields)
 }
 
+/**
+ * Returns the names of entries in the top-level `proxies:` list.
+ *
+ * The runtime API is not guaranteed to be available while the UI is loading
+ * a profile (for example before the VPN has started).  Keeping this small
+ * discovery pass next to the editor parser lets the Proxy Servers screen
+ * still show the user's configured nodes without trying to parse secrets or
+ * reimplementing the full Clash YAML grammar.
+ */
+internal fun proxyNamesFromYaml(yaml: String): List<String> {
+    val lines = yaml.replace("\r\n", "\n").split('\n')
+    var inProxies = false
+    var proxiesIndent = -1
+    var itemIndent: Int? = null
+    val names = linkedSetOf<String>()
+
+    lines.forEach { line ->
+        val trimmed = line.trim()
+        if (!inProxies) {
+            val match = proxyListPattern.matchEntire(line.substringBefore('#').trimEnd())
+            if (match != null && !trimmed.startsWith("-")) {
+                inProxies = true
+                proxiesIndent = match.groupValues[1].length
+                itemIndent = null
+            }
+            return@forEach
+        }
+        if (trimmed.isNotEmpty() && !trimmed.startsWith("#") && leadingSpaces(line) <= proxiesIndent) {
+            inProxies = false
+            return@forEach
+        }
+        if (trimmed.isEmpty() || trimmed.startsWith("#") || !trimmed.startsWith("-")) return@forEach
+        val indent = leadingSpaces(line)
+        if (indent <= proxiesIndent) return@forEach
+        val expectedIndent = itemIndent
+        if (expectedIndent == null) {
+            itemIndent = indent
+        } else if (indent != expectedIndent) {
+            // Nested YAML lists (for example `alpn: [..]` in block form) are
+            // not proxy entries.  Only sibling list items at the first item's
+            // indentation can start another server.
+            return@forEach
+        }
+        proxyNameFromItem(line)?.takeIf(String::isNotBlank)?.let(names::add)
+    }
+    return names.toList()
+}
+
 /** Header maps are a supported part of several transports, even though their
  * key set is intentionally open ended. Keep existing entries in a dedicated
  * section so they are editable without pretending the editor knows every

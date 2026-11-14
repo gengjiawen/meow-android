@@ -81,14 +81,15 @@ class ProxyServersViewModel(
             val (inline, providers, selectedProfile) = supervisorScope {
                 val inline = async { read("inline proxies") { api.proxies() } }
                 val providers = async { read("proxy providers") { api.proxyProviders() } }
-                val selectedProfile = async { profiles.getSelected() }
+                val selectedProfile = async { read("selected profile") { profiles.getSelected() } }
                 Triple(inline.await(), providers.await(), selectedProfile.await())
             }
-            if (inline == null && providers == null) {
+            val profileNodes = selectedProfile?.let { proxyNodesFromYaml(it.yamlContent) }.orEmpty()
+            if (inline == null && providers == null && selectedProfile == null) {
                 _state.update { it.copy(loading = false, failed = true) }
             } else {
                 _state.value = ProxyServersUiState(
-                    providers = proxyServerProviders(inline, providers.orEmpty()),
+                    providers = proxyServerProviders(inline, providers.orEmpty(), profileNodes),
                     editableProfileId = selectedProfile?.takeIf { it.url.isBlank() }?.id,
                     query = _state.value.query,
                     loading = false,
@@ -188,14 +189,34 @@ private suspend fun <T> read(label: String, block: suspend () -> T): T? = try {
     null
 }
 
+/** Builds discoverable rows from the selected profile when the API is cold. */
+internal fun proxyNodesFromYaml(yaml: String): List<ProxyServerNodeUi> =
+    proxyNamesFromYaml(yaml).mapNotNull { name ->
+        val parsed = parseProxyEntry(yaml, name) ?: return@mapNotNull null
+        val type = parsed.type.trim()
+        if (type.isEmpty() || type.lowercase() in BUILTIN_PROXY_TYPES) return@mapNotNull null
+        ProxyServerNodeUi(name = name, type = type, delayMs = null, timedOut = false)
+    }
+
 /** Converts both API views into the cards shown by the screen. */
 internal fun proxyServerProviders(
     inline: ProxiesResult?,
     providers: List<ProxyProvider>,
+    profileNodes: List<ProxyServerNodeUi> = emptyList(),
 ): List<ProxyServerProviderUi> {
     val providerCards = providers.map(ProxyProvider::toUi)
-    val inlineNodes = inline?.proxies.orEmpty()
+    val providerNodeNames = providers
+        .asSequence()
+        .flatMap { it.nodes.asSequence() }
+        .map { it.name }
+        .toSet()
+    val apiInlineNodes = inline?.proxies.orEmpty()
         .values
+        // `/proxies` contains provider members too. They already have their
+        // own read-only provider card; keeping them out of the inline card is
+        // also what prevents an edit action from pointing at a node that is
+        // not declared in the selected profile's top-level `proxies:` list.
+        .filterNot { it.name in providerNodeNames }
         .filterNot { it.type.lowercase() in BUILTIN_PROXY_TYPES }
         .sortedWith(compareBy<Proxy, String>(String.CASE_INSENSITIVE_ORDER) { it.name }.thenBy { it.name })
         .map { proxy ->
@@ -206,6 +227,19 @@ internal fun proxyServerProviders(
                 timedOut = proxy.history.isNotEmpty() && proxy.latestDelay <= 0,
             )
         }
+    // The API is authoritative for health data, but the selected profile is
+    // the reliable source for discovery while the engine is stopped or an API
+    // request fails.  Union by name so a partially available API never hides
+    // local entries, and let API rows replace their YAML counterparts to keep
+    // the latest delay/history.
+    val inlineNodes = linkedMapOf<String, ProxyServerNodeUi>().apply {
+        profileNodes
+            .filterNot { it.type.lowercase() in BUILTIN_PROXY_TYPES }
+            .forEach { put(it.name, it) }
+        apiInlineNodes.forEach { put(it.name, it) }
+    }.values.sortedWith(
+        compareBy<ProxyServerNodeUi, String>(String.CASE_INSENSITIVE_ORDER) { it.name }.thenBy { it.name },
+    )
     if (inlineNodes.isEmpty()) return providerCards
     return providerCards + ProxyServerProviderUi(
         id = INLINE_PROXIES_ID,

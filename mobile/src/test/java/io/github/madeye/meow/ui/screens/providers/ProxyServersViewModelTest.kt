@@ -577,6 +577,81 @@ class ProxyServersViewModelTest {
     }
 
     @Test
+    fun `profile yaml fills inline card when runtime api is unavailable`() {
+        val yaml = """
+            proxies:
+              - { name: Tokyo, type: vless, server: edge.example, port: 443, uuid: id }
+              - name: Direct
+                type: direct
+        """.trimIndent()
+
+        val profileNodes = proxyNodesFromYaml(yaml)
+        val cards = proxyServerProviders(
+            inline = null,
+            providers = emptyList(),
+            profileNodes = profileNodes,
+        )
+
+        assertEquals(1, cards.size)
+        assertEquals(ProxyServerKind.Inline, cards.single().kind)
+        assertEquals(listOf("Tokyo"), cards.single().nodes.map { it.name })
+        assertEquals("vless", cards.single().nodes.single().type)
+    }
+
+    @Test
+    fun `profile and api rows are unioned while api health wins`() {
+        val profile = listOf(ProxyServerNodeUi("Tokyo", "vless", null, false))
+        val api = ProxiesResult(
+            groups = emptyMap(),
+            proxies = mapOf(
+                "Tokyo" to Proxy(
+                    name = "Tokyo",
+                    type = "vless",
+                    history = listOf(ProxyHistory(timeMillis = 1, delay = 88)),
+                ),
+                "Seoul" to Proxy("Seoul", "ss", emptyList()),
+            ),
+        )
+
+        val card = proxyServerProviders(api, emptyList(), profile).single()
+        assertEquals(listOf("Seoul", "Tokyo"), card.nodes.map { it.name })
+        assertEquals(88, card.nodes.first { it.name == "Tokyo" }.delayMs)
+    }
+
+    @Test
+    fun `provider members stay in their provider card and are not editable inline`() {
+        val provider = io.github.madeye.meow.api.ProxyProvider(
+            name = "airport",
+            vehicleType = "HTTP",
+            nodes = listOf(
+                io.github.madeye.meow.api.ProxyProviderNode(
+                    name = "Airport Tokyo",
+                    type = "vless",
+                    alive = true,
+                    delay = null,
+                    history = emptyList(),
+                ),
+            ),
+            testUrl = "",
+            expectedStatus = "",
+            updatedAt = null,
+            usage = null,
+        )
+        val api = ProxiesResult(
+            groups = emptyMap(),
+            proxies = mapOf(
+                "Airport Tokyo" to Proxy("Airport Tokyo", "vless", emptyList()),
+                "Local SS" to Proxy("Local SS", "ss", emptyList()),
+            ),
+        )
+
+        val cards = proxyServerProviders(api, listOf(provider))
+
+        assertEquals(listOf("Airport Tokyo"), cards.first().nodes.map { it.name })
+        assertEquals(listOf("Local SS"), cards.last().nodes.map { it.name })
+    }
+
+    @Test
     fun `server search matches names and protocol while retaining provider grouping`() {
         val cards = listOf(
             ProxyServerProviderUi(
