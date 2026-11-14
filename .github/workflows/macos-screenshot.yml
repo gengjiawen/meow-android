@@ -72,6 +72,11 @@ jobs:
           # Start a fresh adb daemon because this runner image can leave a
           # stale daemon behind before the action launches the emulator.
           ANDROID_I_WANT_MY_TCG: no
+          SSSERVER: ssserver
+          SCREENSHOT_PROXY_SERVERS: "true"
+          SCREENSHOT_PROFILE_URL: https://api.gengjiawen.com/clash.yml
+          SKIP_EMULATOR_BOOT: "true"
+          TUN_WAIT_SECS: "120"
         with:
           api-level: 35
           target: google_apis
@@ -101,16 +106,10 @@ jobs:
             "$ANDROID_HOME/platform-tools/adb" kill-server || true
             "$ANDROID_HOME/platform-tools/adb" start-server
             "$ANDROID_HOME/platform-tools/adb" version
-          script: |
-            ADB="$ANDROID_HOME/platform-tools/adb" \
-            EMULATOR="$ANDROID_HOME/emulator/emulator" \
-            APK="$GITHUB_WORKSPACE/mobile/build/outputs/apk/debug/mobile-debug.apk" \
-            SSSERVER=ssserver \
-            SCREENSHOT_PROXY_SERVERS=true \
-            SCREENSHOT_PROFILE_URL=https://api.gengjiawen.com/clash.yml \
-            SKIP_EMULATOR_BOOT=true \
-            TUN_WAIT_SECS=120 \
-            ./test-e2e.sh
+          # The action executes each physical script line in its own shell.
+          # Keep the path overrides on the same command and put the other
+          # values in `env` below so test-e2e.sh receives them reliably.
+          script: ADB="$ANDROID_HOME/platform-tools/adb" EMULATOR="$ANDROID_HOME/emulator/emulator" APK="mobile/build/outputs/apk/debug/mobile-debug.apk" ./test-e2e.sh
 
       - name: Upload screenshots
         if: always()
