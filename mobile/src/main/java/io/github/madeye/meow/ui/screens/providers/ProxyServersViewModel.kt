@@ -35,6 +35,8 @@ data class ProxyServerNodeUi(
     val delayMs: Int?,
     val timedOut: Boolean,
     val testing: Boolean = false,
+    /** True only for a node declared in the selected profile's top-level proxies list. */
+    val editable: Boolean = false,
 )
 
 @Immutable
@@ -85,11 +87,20 @@ class ProxyServersViewModel(
                 Triple(inline.await(), providers.await(), selectedProfile.await())
             }
             val profileNodes = selectedProfile?.let { proxyNodesFromYaml(it.yamlContent) }.orEmpty()
+            // Keep the distinction between a profile with no inline nodes and
+            // a missing profile.  `/proxies` also contains selector groups and
+            // provider members, so an empty set must filter those rows out.
+            val profileProxyNames = selectedProfile?.let { proxyNamesFromYaml(it.yamlContent).toSet() }
             if (inline == null && providers == null && selectedProfile == null) {
                 _state.update { it.copy(loading = false, failed = true) }
             } else {
                 _state.value = ProxyServersUiState(
-                    providers = proxyServerProviders(inline, providers.orEmpty(), profileNodes),
+                    providers = proxyServerProviders(
+                        inline = inline,
+                        providers = providers.orEmpty(),
+                        profileNodes = profileNodes,
+                        profileProxyNames = profileProxyNames,
+                    ),
                     editableProfileId = selectedProfile?.takeIf { it.url.isBlank() }?.id,
                     query = _state.value.query,
                     loading = false,
@@ -195,7 +206,7 @@ internal fun proxyNodesFromYaml(yaml: String): List<ProxyServerNodeUi> =
         val parsed = parseProxyEntry(yaml, name) ?: return@mapNotNull null
         val type = parsed.type.trim()
         if (type.isEmpty() || type.lowercase() in BUILTIN_PROXY_TYPES) return@mapNotNull null
-        ProxyServerNodeUi(name = name, type = type, delayMs = null, timedOut = false)
+        ProxyServerNodeUi(name = name, type = type, delayMs = null, timedOut = false, editable = true)
     }
 
 /** Converts both API views into the cards shown by the screen. */
@@ -203,6 +214,8 @@ internal fun proxyServerProviders(
     inline: ProxiesResult?,
     providers: List<ProxyProvider>,
     profileNodes: List<ProxyServerNodeUi> = emptyList(),
+    /** Null means the profile was not available; an empty set means it has no inline nodes. */
+    profileProxyNames: Set<String>? = null,
 ): List<ProxyServerProviderUi> {
     val providerCards = providers.map(ProxyProvider::toUi)
     val providerNodeNames = providers
@@ -217,6 +230,7 @@ internal fun proxyServerProviders(
         // also what prevents an edit action from pointing at a node that is
         // not declared in the selected profile's top-level `proxies:` list.
         .filterNot { it.name in providerNodeNames }
+        .filter { profileProxyNames == null || it.name in profileProxyNames }
         .filterNot { it.type.lowercase() in BUILTIN_PROXY_TYPES }
         .sortedWith(compareBy<Proxy, String>(String.CASE_INSENSITIVE_ORDER) { it.name }.thenBy { it.name })
         .map { proxy ->
@@ -235,8 +249,11 @@ internal fun proxyServerProviders(
     val inlineNodes = linkedMapOf<String, ProxyServerNodeUi>().apply {
         profileNodes
             .filterNot { it.type.lowercase() in BUILTIN_PROXY_TYPES }
-            .forEach { put(it.name, it) }
-        apiInlineNodes.forEach { put(it.name, it) }
+            .forEach { put(it.name, it.copy(editable = true)) }
+        apiInlineNodes.forEach { apiNode ->
+            val profileNode = get(apiNode.name)
+            put(apiNode.name, apiNode.copy(editable = profileNode?.editable == true))
+        }
     }.values.sortedWith(
         compareBy<ProxyServerNodeUi, String>(String.CASE_INSENSITIVE_ORDER) { it.name }.thenBy { it.name },
     )

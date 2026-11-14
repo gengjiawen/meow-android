@@ -112,16 +112,16 @@ fun HomeScreen(
             item { ExitIpCard(state = exitIp, nat = exitNat, onRefresh = onRefreshExitIp) }
         }
 
-        // Provider nodes and rules read the engine's controller API, so they
-        // are only reachable while the VPN is up.
+        // Proxy Servers also reads the selected profile's top-level proxies
+        // when the engine is stopped. Keep it reachable while disconnected so
+        // local nodes can be inspected and edited before the next connection.
         item {
             GlassCard(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
                 NavRow(
                     title = stringResource(R.string.proxy_servers_title),
                     icon = Icons.Filled.Dns,
                     onClick = onProxyServers,
-                    enabled = state.isConnected,
-                    subtitle = offlineHint.takeUnless { state.isConnected },
+                    enabled = true,
                 )
                 androidx.compose.material3.HorizontalDivider(color = MaterialTheme.meow.border)
                 NavRow(

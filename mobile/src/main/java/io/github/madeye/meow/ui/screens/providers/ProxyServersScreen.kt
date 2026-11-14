@@ -213,7 +213,9 @@ private fun ProviderCard(
             provider.nodes.forEach { node ->
                 ProviderNodeRow(
                     node = node,
-                    editable = provider.kind == ProxyServerKind.Inline && editableProfileId != null,
+                    editable = provider.kind == ProxyServerKind.Inline &&
+                        node.editable &&
+                        editableProfileId != null,
                     onEdit = { editableProfileId?.let { onEditProfile(it, node.name) } },
                     onTest = { onTestNode(node.name) },
                 )

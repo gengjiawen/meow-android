@@ -652,6 +652,28 @@ class ProxyServersViewModelTest {
     }
 
     @Test
+    fun `profile names keep runtime groups out of editable inline card`() {
+        val api = ProxiesResult(
+            groups = emptyMap(),
+            proxies = mapOf(
+                "Local SS" to Proxy("Local SS", "ss", emptyList()),
+                "Proxy" to Proxy("Proxy", "Selector", emptyList()),
+            ),
+        )
+        val profileNodes = listOf(ProxyServerNodeUi("Local SS", "ss", null, false, editable = true))
+
+        val cards = proxyServerProviders(
+            inline = api,
+            providers = emptyList(),
+            profileNodes = profileNodes,
+            profileProxyNames = setOf("Local SS"),
+        )
+
+        assertEquals(listOf("Local SS"), cards.single().nodes.map { it.name })
+        assertTrue(cards.single().nodes.single().editable)
+    }
+
+    @Test
     fun `server search matches names and protocol while retaining provider grouping`() {
         val cards = listOf(
             ProxyServerProviderUi(
