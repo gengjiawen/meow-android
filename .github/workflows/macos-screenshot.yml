@@ -25,7 +25,7 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          # macos-13 is an Intel host. Build the x86_64 ABI that its emulator
+          # macos-15-intel is an Intel host. Build the x86_64 ABI that its emulator
           # can execute natively with the host hypervisor.
           targets: x86_64-linux-android
 
@@ -68,7 +68,10 @@ jobs:
       - name: Boot emulator and capture Proxy Servers
         uses: reactivecircus/android-emulator-runner@v2
         env:
-          ANDROID_I_WANT_MY_TCG: yes
+          # The Intel runner supports the normal hardware-accelerated path.
+          # Start a fresh adb daemon because this runner image can leave a
+          # stale daemon behind before the action launches the emulator.
+          ANDROID_I_WANT_MY_TCG: no
         with:
           api-level: 35
           target: google_apis
@@ -77,6 +80,11 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           emulator-boot-timeout: 300
           disable-animations: true
+          pre-emulator-launch-script: |
+            set -euxo pipefail
+            "$ANDROID_HOME/platform-tools/adb" kill-server || true
+            "$ANDROID_HOME/platform-tools/adb" start-server
+            "$ANDROID_HOME/platform-tools/adb" version
           script: |
             ADB="$ANDROID_HOME/platform-tools/adb" \
             EMULATOR="$ANDROID_HOME/emulator/emulator" \
