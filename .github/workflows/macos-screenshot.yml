@@ -74,7 +74,9 @@ jobs:
         env:
           # Start a fresh adb daemon because this runner image can leave a
           # stale daemon behind before the action launches the emulator.
-          ANDROID_I_WANT_MY_TCG: no
+          # macOS hosted runners may expose an ARM CPU without usable HVF;
+          # the emulator options below force the matching software backend.
+          ANDROID_I_WANT_MY_TCG: yes
           SSSERVER: ssserver
           SCREENSHOT_PROXY_SERVERS: "true"
           SCREENSHOT_PROFILE_URL: https://api.gengjiawen.com/clash.yml
@@ -90,24 +92,17 @@ jobs:
           # enough time for the first boot.
           emulator-options: >-
             -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-            -no-snapshot -accel on
+            -no-snapshot -accel off -qemu -accel tcg,thread=multi
           emulator-boot-timeout: 1200
           disable-animations: true
-          pre-emulator-launch-script: |
-            set -euxo pipefail
-            # Keep the first boot small enough for the hosted runner's single
-            # available vCPU and slow software display path.
-            AVD_CONFIG="$HOME/.android/avd/test.avd/config.ini"
-            if [ -f "$AVD_CONFIG" ]; then
-              {
-                echo 'hw.lcd.width=720'
-                echo 'hw.lcd.height=1280'
-                echo 'hw.lcd.density=320'
-                echo 'hw.ramSize=1536'
-              } >> "$AVD_CONFIG"
-            fi
-            "$ANDROID_HOME/platform-tools/adb" kill-server || true
-            "$ANDROID_HOME/platform-tools/adb" start-server
+          # The action executes each physical script line in its own shell.
+          # Keep this one physical line so the AVD and adb setup is atomic.
+          pre-emulator-launch-script: >-
+            printf '%s\n' 'hw.lcd.width=720' 'hw.lcd.height=1280'
+            'hw.lcd.density=320' 'hw.ramSize=1536'
+            >> "$HOME/.android/avd/test.avd/config.ini";
+            "$ANDROID_HOME/platform-tools/adb" kill-server || true;
+            "$ANDROID_HOME/platform-tools/adb" start-server;
             "$ANDROID_HOME/platform-tools/adb" version
           # The action executes each physical script line in its own shell.
           # Keep the path overrides on the same command and put the other
