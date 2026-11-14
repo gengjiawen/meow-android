@@ -272,6 +272,32 @@ if [[ -n "$SCREENSHOT_PROFILE_URL" ]]; then
     info "  Downloading screenshot profile from configured review URL"
     SUB_YAML=$(curl -fsSL --max-time 45 "$SCREENSHOT_PROFILE_URL") ||
         fail "Screenshot profile download failed"
+    # Keep the real subscription nodes for discovery and protocol coverage,
+    # but make the first editable row a local, disposable SS endpoint. The
+    # editor screenshot then cannot expose a subscription server or credential
+    # in a public Actions artifact, while the page still renders every node
+    # from the supplied profile.
+    printf '%s\n' "$SUB_YAML" >/tmp/meow-screenshot-profile.yml
+    python3 - "$SS_HOST_FROM_EMU" "$SS_PORT" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path("/tmp/meow-screenshot-profile.yml")
+lines = path.read_text().splitlines()
+host, port = sys.argv[1:3]
+entry = (
+    "  - { name: AAA Screenshot Inline SS, type: ss, server: "
+    f"{host}, port: {port}, cipher: aes-256-gcm, password: testpassword123 }}"
+)
+for index, line in enumerate(lines):
+    if line.strip() == "proxies:":
+        lines.insert(index + 1, entry)
+        break
+else:
+    raise SystemExit("configured screenshot profile has no top-level proxies list")
+path.write_text("\n".join(lines) + "\n")
+PY
+    SUB_YAML=$(cat /tmp/meow-screenshot-profile.yml)
 fi
 
 # Create a fresh Room database on the host with the correct schema.

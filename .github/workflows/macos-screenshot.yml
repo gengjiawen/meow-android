@@ -129,7 +129,6 @@ jobs:
         with:
           name: proxy-servers-macos-diagnostics
           path: |
-            e2e-logcat.log
             ui_dump_*.xml
           if-no-files-found: ignore
           retention-days: 14
