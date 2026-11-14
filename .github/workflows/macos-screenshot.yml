@@ -77,11 +77,27 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_2
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          emulator-boot-timeout: 300
+          # A cold x86_64 Android 35 boot on the hosted Intel runner can stay
+          # offline for several minutes while the userdata image initializes.
+          # Avoid snapshot probing and allow enough time for the first boot.
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+            -no-snapshot -accel on
+          emulator-boot-timeout: 1200
           disable-animations: true
           pre-emulator-launch-script: |
             set -euxo pipefail
+            # Keep the first boot small enough for the hosted runner's single
+            # available vCPU and slow software display path.
+            AVD_CONFIG="$HOME/.android/avd/test.avd/config.ini"
+            if [ -f "$AVD_CONFIG" ]; then
+              {
+                echo 'hw.lcd.width=720'
+                echo 'hw.lcd.height=1280'
+                echo 'hw.lcd.density=320'
+                echo 'hw.ramSize=1536'
+              } >> "$AVD_CONFIG"
+            fi
             "$ANDROID_HOME/platform-tools/adb" kill-server || true
             "$ANDROID_HOME/platform-tools/adb" start-server
             "$ANDROID_HOME/platform-tools/adb" version
