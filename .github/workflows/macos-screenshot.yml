@@ -13,14 +13,12 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 90
     env:
-      # macos-latest is an Apple Silicon runner on the current GitHub image;
-      # keep the expressions architecture-aware so a label migration back to
-      # Intel still produces an emulator-compatible APK instead of an adb
-      # device that cannot execute the native library.
-      TARGET_ABI: ${{ runner.arch == 'ARM64' && 'arm64' || 'x86_64' }}
-      EMULATOR_ARCH: ${{ runner.arch == 'ARM64' && 'arm64-v8a' || 'x86_64' }}
-      RUST_ANDROID_TARGET: ${{ runner.arch == 'ARM64' && 'aarch64-linux-android' || 'x86_64-linux-android' }}
-      SS_TARGET: ${{ runner.arch == 'ARM64' && 'aarch64-apple-darwin' || 'x86_64-apple-darwin' }}
+      # macos-latest is the Apple Silicon arm64 image. Keep the native Android
+      # ABI consistent across Cargo, the APK, and the emulator guest.
+      TARGET_ABI: arm64
+      EMULATOR_ARCH: arm64-v8a
+      RUST_ANDROID_TARGET: aarch64-linux-android
+      SS_TARGET: aarch64-apple-darwin
 
     steps:
       - uses: actions/checkout@v4
