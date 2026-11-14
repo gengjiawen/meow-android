@@ -82,7 +82,9 @@ jobs:
           # GitHub's macOS runners can expose an ARM host without usable HVF.
           # Force QEMU software virtualization so the screenshot job remains
           # deterministic instead of failing before adb sees the emulator.
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -accel off
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+            -accel off -qemu -accel tcg,thread=multi
           # Software ARM64 emulation can take longer than the action default.
           emulator-boot-timeout: 1200
           disable-animations: true
