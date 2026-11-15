@@ -94,6 +94,18 @@ wait_for_boot() {
     fail "Emulator did not boot within 120s"
 }
 
+wait_for_package_service() {
+    info "Waiting for Android package service..."
+    for i in $(seq 1 90); do
+        if "$ADB" shell pm path android 2>/dev/null | grep -q '^package:'; then
+            info "Android package service is ready (attempt $i)"
+            return 0
+        fi
+        sleep 2
+    done
+    fail "Android package service did not become available"
+}
+
 screenshot() {
     local name="$1"
     # Stream the PNG directly like the dedicated Claude screenshot harnesses;
@@ -188,6 +200,8 @@ else
     "$ADB" shell input keyevent KEYCODE_HOME
     sleep 2
 fi
+
+wait_for_package_service
 
 "$ADB" shell settings put global window_animation_scale 0
 "$ADB" shell settings put global transition_animation_scale 0

@@ -82,6 +82,7 @@ jobs:
           SCREENSHOT_PROFILE_URL: https://api.gengjiawen.com/clash.yml
           SKIP_EMULATOR_BOOT: "true"
           TUN_WAIT_SECS: "120"
+          ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL: "5"
         with:
           api-level: 30
           target: google_apis
