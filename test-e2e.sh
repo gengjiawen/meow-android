@@ -224,6 +224,18 @@ install_apk() {
     local attempt
     for attempt in 1 2 3; do
         "$ADB" uninstall "$PKG" >/dev/null 2>&1 || true
+        # API 30 macOS runners intermittently break adb's streamed install
+        # after the package service comes up. Push through shared storage and
+        # let the shell package manager read it instead; this also avoids the
+        # fchown that adb push performs under /data/local/tmp.
+        if "$ADB" push "$APK" /sdcard/meow-e2e.apk >/dev/null 2>&1 &&
+           "$ADB" shell "pm install -r -g /sdcard/meow-e2e.apk" 2>&1 | grep -q "Success"; then
+            "$ADB" shell rm -f /sdcard/meow-e2e.apk >/dev/null 2>&1 || true
+            return 0
+        fi
+        "$ADB" shell rm -f /sdcard/meow-e2e.apk >/dev/null 2>&1 || true
+        # Keep the normal install as a fallback for physical devices and
+        # emulator images where shared-storage installs are restricted.
         if "$ADB" install -g "$APK"; then
             return 0
         fi
