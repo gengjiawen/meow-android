@@ -106,6 +106,28 @@ wait_for_package_service() {
     fail "Android package service did not become available"
 }
 
+# A 56MB debug APK can make an uncompressed adb sync look hung on the Intel
+# macOS runner. Keep individual transfers bounded so a bad adb session can be
+# restarted by install_apk instead of consuming the whole workflow timeout.
+run_with_timeout() {
+    local seconds="$1"
+    shift
+    "$@" &
+    local child=$!
+    local started=$SECONDS
+    while kill -0 "$child" 2>/dev/null; do
+        if (( SECONDS - started >= seconds )); then
+            kill "$child" 2>/dev/null || true
+            sleep 1
+            kill -KILL "$child" 2>/dev/null || true
+            wait "$child" 2>/dev/null || true
+            return 124
+        fi
+        sleep 1
+    done
+    wait "$child"
+}
+
 screenshot() {
     local name="$1"
     # Stream the PNG directly like the dedicated Claude screenshot harnesses;
@@ -228,9 +250,11 @@ install_apk() {
         # after the package service comes up. Push through shared storage and
         # let the shell package manager read it instead; this also avoids the
         # fchown that adb push performs under /data/local/tmp.
-        if "$ADB" push "$APK" /sdcard/meow-e2e.apk >/dev/null 2>&1; then
+        # Compression is supported by the runner's current adb and avoids the
+        # extremely slow raw 56MB sync seen on macOS Intel.
+        if run_with_timeout 180 "$ADB" push -z any "$APK" /sdcard/meow-e2e.apk >/dev/null 2>&1; then
             local shared_install
-            shared_install=$("$ADB" shell "pm install -r -g /sdcard/meow-e2e.apk" 2>&1 || true)
+            shared_install=$(run_with_timeout 180 "$ADB" shell "pm install -r -g /sdcard/meow-e2e.apk" 2>&1 || true)
             info "  Shared-storage install: $(echo "$shared_install" | tr '\r\n' '  ')"
             if echo "$shared_install" | grep -q "Success"; then
                 "$ADB" shell rm -f /sdcard/meow-e2e.apk >/dev/null 2>&1 || true
@@ -240,7 +264,7 @@ install_apk() {
         "$ADB" shell rm -f /sdcard/meow-e2e.apk >/dev/null 2>&1 || true
         # Keep the normal install as a fallback for physical devices and
         # emulator images where shared-storage installs are restricted.
-        if "$ADB" install -g "$APK"; then
+        if run_with_timeout 180 "$ADB" install -g "$APK"; then
             return 0
         fi
         # MIUI/HyperOS rejects adb installs (INSTALL_FAILED_USER_RESTRICTED);
