@@ -656,6 +656,19 @@ capture_proxy_servers
 
 if [[ "$SCREENSHOT_PROXY_SERVERS" == "true" ]]; then
     info "Screenshot flow complete."
+    # reactivecircus/android-emulator-runner sometimes leaves the macOS
+    # emulator process alive after `adb emu kill`, so its post-step can wait
+    # indefinitely and never reach the artifact upload steps. The screenshot
+    # job owns the single `test` AVD; stop both the wrapper and qemu process
+    # here after all PNGs have been flushed.
+    if [[ "${CI:-}" == "true" ]]; then
+        info "Stopping CI emulator before runner cleanup..."
+        pkill -TERM -f '[e]mulator.*-avd test' >/dev/null 2>&1 || true
+        pkill -TERM -f '[q]emu-system.*test.avd' >/dev/null 2>&1 || true
+        sleep 2
+        pkill -KILL -f '[e]mulator.*-avd test' >/dev/null 2>&1 || true
+        pkill -KILL -f '[q]emu-system.*test.avd' >/dev/null 2>&1 || true
+    fi
     exit 0
 fi
 
