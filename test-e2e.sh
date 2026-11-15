@@ -252,6 +252,21 @@ install_apk() {
         if run_with_timeout 240 "$ADB" install -g "$APK"; then
             return 0
         fi
+        # A streamed `adb install` can stall on the API 30 Intel image while
+        # the package manager waits for the APK transport to finish. Stream
+        # the file directly into /data/local/tmp instead. This avoids both the
+        # streamed-install race and the post-copy fchown that `adb push` uses,
+        # while keeping the package manager on its preferred path.
+        if run_with_timeout 180 "$ADB" shell -T "cat > /data/local/tmp/meow-e2e.apk" < "$APK"; then
+            local tmp_install
+            tmp_install=$(run_with_timeout 180 "$ADB" shell "pm install -r -g /data/local/tmp/meow-e2e.apk" 2>&1 || true)
+            info "  Direct /data/local/tmp install: $(echo "$tmp_install" | tr '\r\n' '  ')"
+            if echo "$tmp_install" | grep -q "Success"; then
+                "$ADB" shell rm -f /data/local/tmp/meow-e2e.apk >/dev/null 2>&1 || true
+                return 0
+            fi
+        fi
+        "$ADB" shell rm -f /data/local/tmp/meow-e2e.apk >/dev/null 2>&1 || true
         # API 30 macOS runners intermittently break adb's streamed install
         # after the package service comes up. Push through shared storage and
         # let the shell package manager read it instead; this also avoids the
