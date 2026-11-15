@@ -228,10 +228,14 @@ install_apk() {
         # after the package service comes up. Push through shared storage and
         # let the shell package manager read it instead; this also avoids the
         # fchown that adb push performs under /data/local/tmp.
-        if "$ADB" push "$APK" /sdcard/meow-e2e.apk >/dev/null 2>&1 &&
-           "$ADB" shell "pm install -r -g /sdcard/meow-e2e.apk" 2>&1 | grep -q "Success"; then
-            "$ADB" shell rm -f /sdcard/meow-e2e.apk >/dev/null 2>&1 || true
-            return 0
+        if "$ADB" push "$APK" /sdcard/meow-e2e.apk >/dev/null 2>&1; then
+            local shared_install
+            shared_install=$("$ADB" shell "pm install -r -g /sdcard/meow-e2e.apk" 2>&1 || true)
+            info "  Shared-storage install: $(echo "$shared_install" | tr '\r\n' '  ')"
+            if echo "$shared_install" | grep -q "Success"; then
+                "$ADB" shell rm -f /sdcard/meow-e2e.apk >/dev/null 2>&1 || true
+                return 0
+            fi
         fi
         "$ADB" shell rm -f /sdcard/meow-e2e.apk >/dev/null 2>&1 || true
         # Keep the normal install as a fallback for physical devices and
