@@ -246,6 +246,12 @@ install_apk() {
     local attempt
     for attempt in 1 2 3; do
         "$ADB" uninstall "$PKG" >/dev/null 2>&1 || true
+        # Once the package service is ready, prefer the adb streaming path.
+        # It avoids the SELinux restriction on pm reading /sdcard and is much
+        # faster than first copying the 56MB APK to shared storage.
+        if run_with_timeout 240 "$ADB" install -g "$APK"; then
+            return 0
+        fi
         # API 30 macOS runners intermittently break adb's streamed install
         # after the package service comes up. Push through shared storage and
         # let the shell package manager read it instead; this also avoids the
@@ -262,11 +268,8 @@ install_apk() {
             fi
         fi
         "$ADB" shell rm -f /sdcard/meow-e2e.apk >/dev/null 2>&1 || true
-        # Keep the normal install as a fallback for physical devices and
-        # emulator images where shared-storage installs are restricted.
-        if run_with_timeout 180 "$ADB" install -g "$APK"; then
-            return 0
-        fi
+        # Keep the shared-storage path as a fallback for physical devices and
+        # emulator images where streamed installs are restricted.
         # MIUI/HyperOS rejects adb installs (INSTALL_FAILED_USER_RESTRICTED);
         # rooted devices sidestep via `pm install` as root.
         if "$ADB" shell "su -c id" 2>/dev/null | grep -q "uid=0"; then
@@ -282,6 +285,7 @@ install_apk() {
         "$ADB" start-server >/dev/null 2>&1 || true
         "$ADB" wait-for-device
         wait_for_boot
+        wait_for_package_service
         sleep 3
     done
     return 1

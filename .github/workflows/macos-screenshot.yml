@@ -71,6 +71,7 @@ jobs:
         run: ./gradlew :mobile:assembleDebug -PTARGET_ABI="$TARGET_ABI" -PCARGO_PROFILE=debug
 
       - name: Boot emulator and capture Proxy Servers
+        timeout-minutes: 25
         uses: reactivecircus/android-emulator-runner@v2
         env:
           # Start a fresh adb daemon because this runner image can leave a
