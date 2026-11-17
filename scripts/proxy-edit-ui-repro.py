@@ -271,7 +271,7 @@ def main():
         path = Path(scratch) / "meow.db"
         path.write_bytes(adb("exec-out", "run-as", PKG, "cat", "databases/meow.db", binary=True))
         wal = adb("exec-out", "run-as", PKG, "cat", "databases/meow.db-wal", binary=True, check=False)
-        if wal:
+        if wal[:4] in (b"\x37\x7f\x06\x82", b"\x37\x7f\x06\x83"):
             Path(str(path) + "-wal").write_bytes(wal)
         db = sqlite3.connect(path)
         yaml = db.execute("SELECT yaml_content FROM clash_profile WHERE selected = 1").fetchone()[0]
