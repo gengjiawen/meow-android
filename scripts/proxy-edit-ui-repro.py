@@ -141,13 +141,7 @@ dns:
   listen: 127.0.0.1:1053
   nameserver: [1.1.1.1]
 proxies:
-  - name: AAA Snell Editor
-    type: snell
-    server: 127.0.0.1
-    port: 1443
-    psk: synthetic-ui-test-key
-    version: 4
-    dialer-proxy: Relay A
+  - {name: AAA Snell Editor, type: snell, server: 127.0.0.1, port: 1443, psk: synthetic-ui-test-key, version: 4, obfs-opts: {mode: http, host: synthetic.example}, dialer-proxy: Relay A}
   - name: Relay A
     type: socks5
     server: 127.0.0.1
@@ -263,6 +257,24 @@ def main():
     wait_for(by_id("proxy_servers_root"))
     check(True, "Saving the modified Snell proxy returns to Proxy Servers")
 
+    # Read persisted YAML after stopping the app, including SQLite's WAL.
+    # Only synthetic assertions are retained; database bytes stay in /tmp.
+    adb("shell", "am", "force-stop", PKG)
+    with tempfile.TemporaryDirectory() as scratch:
+        path = Path(scratch) / "meow.db"
+        path.write_bytes(adb("exec-out", "run-as", PKG, "cat", "databases/meow.db", binary=True))
+        wal = adb("exec-out", "run-as", PKG, "cat", "databases/meow.db-wal", binary=True, check=False)
+        if wal:
+            Path(str(path) + "-wal").write_bytes(wal)
+        db = sqlite3.connect(path)
+        yaml = db.execute("SELECT yaml_content FROM clash_profile WHERE selected = 1").fetchone()[0]
+        db.close()
+        check(bool(re.search(r'''dialer-proxy:\s*['"]?Relay Group\b''', yaml)),
+              "Room YAML persists dialer-proxy Relay Group")
+        check(bool(re.search(r'''version:\s*['"]?6\b''', yaml)),
+              "Room YAML persists Snell version 6")
+    adb("shell", "am", "start", "-W", "-n", PKG + "/.MainActivity", "-f", "0x10008000", "--ez", "auto_connect", "true", timeout=45)
+    tap_match(by_text("Proxy Servers"))
     tap_match(by_id("proxy_servers_edit_AAA Snell Editor"))
     wait_for(by_id("proxy_edit_name"))
     version = scroll_to(by_id("proxy_edit_version"))

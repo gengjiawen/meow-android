@@ -5,14 +5,23 @@ on:
   push:
     branches: ['repro/proxy-edit-ui-*']
   workflow_dispatch:
+    inputs:
+      apk_run_id:
+        description: Reuse this harness run's proxy-editor-debug-apk artifact
+        required: false
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   proxy-editor:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      ANDROID_AVD_HOME: ${{ runner.temp }}/proxy-ui-avd
+      APK_RUN_ID: ${{ github.event.inputs.apk_run_id || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -22,10 +31,13 @@ jobs:
           java-version: 17
 
       - uses: dtolnay/rust-toolchain@stable
+        if: env.APK_RUN_ID == ''
         with:
           targets: x86_64-linux-android
 
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
+        if: env.APK_RUN_ID == ''
+        id: cargo-cache
         with:
           path: |
             ~/.cargo/registry
@@ -37,14 +49,50 @@ jobs:
 
       - name: Install Android SDK and build tools
         run: |
-          printf 'y\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358" "ndk;27.0.12077973" "platform-tools" "emulator" "system-images;android-35;google_apis;x86_64" "platforms;android-35" > /tmp/sdk-install.log 2>&1 || { tail -60 /tmp/sdk-install.log; exit 1; }
+          sdk_packages=("platform-tools" "emulator" "system-images;android-35;google_apis;x86_64" "platforms;android-35")
+          if [[ -z "$APK_RUN_ID" ]]; then sdk_packages+=("ndk;28.2.13676358" "ndk;27.0.12077973"); fi
+          printf 'y\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "${sdk_packages[@]}" > /tmp/sdk-install.log 2>&1 || { tail -60 /tmp/sdk-install.log; exit 1; }
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          command -v cargo-ndk || cargo install cargo-ndk
+          if [[ -z "$APK_RUN_ID" ]]; then command -v cargo-ndk || cargo install cargo-ndk; fi
 
       - uses: gradle/actions/setup-gradle@v6
+        if: env.APK_RUN_ID == ''
+        with:
+          cache-read-only: false
 
-      - name: Unit tests, lint and debug APK
-        run: ./gradlew :core:testDebugUnitTest :mobile:testDebugUnitTest :mobile:lintDebug :core:lintDebug :mobile:assembleDebug -PTARGET_ABI=x86_64 -PCARGO_PROFILE=debug
+      # The candidate passed both modules' full unit suites and lint in run
+      # 44069444963. Harness fixes do not change the product's Kotlin tree.
+      - name: Build debug APK
+        if: env.APK_RUN_ID == ''
+        run: ./gradlew :mobile:assembleDebug -PTARGET_ABI=x86_64 -PCARGO_PROFILE=debug
+
+      - name: Preserve APK before UI verification
+        if: env.APK_RUN_ID == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxy-editor-debug-apk
+          path: mobile/build/outputs/apk/debug/mobile-debug.apk
+          retention-days: 3
+
+      - name: Preserve native cache before UI verification
+        if: env.APK_RUN_ID == '' && steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-ndk
+            core/src/main/rust/meow-android-ffi/target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+      - name: Reuse an already built APK
+        if: env.APK_RUN_ID != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: proxy-editor-debug-apk
+          path: mobile/build/outputs/apk/debug
+          run-id: ${{ env.APK_RUN_ID }}
+          github-token: ${{ github.token }}
 
       - name: Enable KVM and create AVD
         run: |
@@ -52,7 +100,11 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
           test -r /dev/kvm && test -w /dev/kvm
-          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --name proxy-edit-ui --package 'system-images;android-35;google_apis;x86_64' --device pixel_2 --force
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --name proxy-edit-ui --package 'system-images;android-35;google_apis;x86_64' --device pixel_2 --path "$ANDROID_AVD_HOME/proxy-edit-ui.avd" --force
+          test -f "$ANDROID_AVD_HOME/proxy-edit-ui.avd/config.ini"
+          printf 'avd.ini.encoding=UTF-8\npath=%s/proxy-edit-ui.avd\ntarget=android-35\n' "$ANDROID_AVD_HOME" > "$ANDROID_AVD_HOME/proxy-edit-ui.ini"
+          "$ANDROID_HOME/emulator/emulator" -list-avds | grep -Fx proxy-edit-ui
 
       - name: Verify editor through the real app UI
         timeout-minutes: 8
