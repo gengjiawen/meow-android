@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      ANDROID_AVD_HOME: ${{ runner.temp }}/proxy-ui-avd
+      ANDROID_AVD_HOME: /tmp/proxy-ui-avd
       APK_RUN_ID: ${{ github.event.inputs.apk_run_id || '' }}
     steps:
       - uses: actions/checkout@v4
@@ -30,30 +30,29 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - uses: dtolnay/rust-toolchain@stable
-        if: env.APK_RUN_ID == ''
-        with:
-          targets: x86_64-linux-android
-
-      - uses: actions/cache/restore@v4
-        if: env.APK_RUN_ID == ''
-        id: cargo-cache
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/bin/cargo-ndk
-            core/src/main/rust/meow-android-ffi/target
-          key: cargo-${{ runner.os }}-x86_64-${{ hashFiles('core/src/main/rust/**/Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-x86_64-
-
       - name: Install Android SDK and build tools
         run: |
           sdk_packages=("platform-tools" "emulator" "system-images;android-35;google_apis;x86_64" "platforms;android-35")
           if [[ -z "$APK_RUN_ID" ]]; then sdk_packages+=("ndk;28.2.13676358" "ndk;27.0.12077973"); fi
           printf 'y\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "${sdk_packages[@]}" > /tmp/sdk-install.log 2>&1 || { tail -60 /tmp/sdk-install.log; exit 1; }
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          if [[ -z "$APK_RUN_ID" ]]; then command -v cargo-ndk || cargo install cargo-ndk; fi
+
+      - name: Reuse the unchanged core native library
+        if: env.APK_RUN_ID == ''
+        uses: actions/download-artifact@v4
+        with:
+          repository: meow-rs/meow-android
+          run-id: 44065307175
+          name: debug-apk
+          path: /tmp/upstream-debug-apk
+          github-token: ${{ github.token }}
+
+      - name: Seed the native library output
+        if: env.APK_RUN_ID == ''
+        run: |
+          mkdir -p core/build/rustJniLibs/android/x86_64
+          unzip -p /tmp/upstream-debug-apk/mobile-debug.apk lib/x86_64/libmeow_android_ffi.so > core/build/rustJniLibs/android/x86_64/libmeow_android_ffi.so
+          test -s core/build/rustJniLibs/android/x86_64/libmeow_android_ffi.so
 
       - uses: gradle/actions/setup-gradle@v6
         if: env.APK_RUN_ID == ''
@@ -64,7 +63,7 @@ jobs:
       # 44069444963. Harness fixes do not change the product's Kotlin tree.
       - name: Build debug APK
         if: env.APK_RUN_ID == ''
-        run: ./gradlew :mobile:assembleDebug -PTARGET_ABI=x86_64 -PCARGO_PROFILE=debug
+        run: ./gradlew :mobile:assembleDebug -PTARGET_ABI=x86_64 -PCARGO_PROFILE=debug -x :core:cargoBuild -x :core:cargoBuildX86_64
 
       - name: Preserve APK before UI verification
         if: env.APK_RUN_ID == ''
@@ -73,17 +72,6 @@ jobs:
           name: proxy-editor-debug-apk
           path: mobile/build/outputs/apk/debug/mobile-debug.apk
           retention-days: 3
-
-      - name: Preserve native cache before UI verification
-        if: env.APK_RUN_ID == '' && steps.cargo-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/bin/cargo-ndk
-            core/src/main/rust/meow-android-ffi/target
-          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
       - name: Reuse an already built APK
         if: env.APK_RUN_ID != ''
