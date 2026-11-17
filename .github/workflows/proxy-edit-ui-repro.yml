@@ -59,11 +59,9 @@ jobs:
         with:
           cache-read-only: false
 
-      # The candidate passed both modules' full unit suites and lint in run
-      # 44069444963. Harness fixes do not change the product's Kotlin tree.
-      - name: Build debug APK
+      - name: Unit tests, lint and debug APK
         if: env.APK_RUN_ID == ''
-        run: ./gradlew :mobile:assembleDebug -PTARGET_ABI=x86_64 -PCARGO_PROFILE=debug -x :core:cargoBuild -x :core:cargoBuildX86_64
+        run: ./gradlew :core:testDebugUnitTest :mobile:testDebugUnitTest :mobile:lintDebug :mobile:assembleDebug -PTARGET_ABI=x86_64 -PCARGO_PROFILE=debug -x :core:cargoBuild -x :core:cargoBuildX86_64
 
       - name: Preserve APK before UI verification
         if: env.APK_RUN_ID == ''
@@ -111,13 +109,13 @@ jobs:
           retention-days: 5
 
       - name: Upload check reports
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: proxy-editor-check-reports
           path: |
+            core/build/reports/tests/testDebugUnitTest/
             mobile/build/reports/tests/testDebugUnitTest/
             mobile/build/reports/lint-results-debug.html
-            core/build/reports/lint-results-debug.html
           if-no-files-found: ignore
           retention-days: 5

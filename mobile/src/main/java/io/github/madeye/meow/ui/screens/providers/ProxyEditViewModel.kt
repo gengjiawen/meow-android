@@ -37,7 +37,7 @@ data class ProxyEditUiState(
     val type: String = "",
     val fields: List<ProxyEditField> = emptyList(),
     val initialFields: List<ProxyEditField> = emptyList(),
-    /** Keys explicitly removed by the user, including unknown Advanced keys. */
+    /** Optional keys cleared by the user, including unknown Advanced keys. */
     val removedKeys: Set<String> = emptySet(),
     val loading: Boolean = true,
     val saving: Boolean = false,
@@ -76,40 +76,7 @@ class ProxyEditViewModel(
     }
 
     fun update(key: String, value: String) {
-        _state.update { state ->
-            if (state.saving) return@update state
-            val changed = state.fields.map { field ->
-                if (field.key == key) {
-                    // Clearing an optional control means "use the protocol
-                    // default" and removes the key on save. Required values
-                    // stay present so the validator can report a useful
-                    // configuration error instead of silently dropping them.
-                    field.copy(value = value, present = field.required || value.isNotEmpty())
-                } else {
-                    field
-                }
-            }
-            state.copy(
-                fields = adaptProxyFields(state.type, changed),
-                removedKeys = state.removedKeys - key,
-                error = null,
-            )
-        }
-    }
-
-    /** Removes an optional key from the YAML while keeping it available to add again. */
-    fun remove(key: String) {
-        _state.update { state ->
-            if (state.saving) return@update state
-            val changed = state.fields.map { field ->
-                if (field.key == key) field.copy(value = "", present = false) else field
-            }
-            state.copy(
-                fields = adaptProxyFields(state.type, changed),
-                removedKeys = state.removedKeys + key,
-                error = null,
-            )
-        }
+        _state.update { updateProxyEditField(it, key, value) }
     }
 
     fun save(onDone: () -> Unit) {
@@ -152,6 +119,24 @@ class ProxyEditViewModel(
             onDone()
         }
     }
+}
+
+/** Clearing a field restores its default; required fields remain available for validation. */
+internal fun updateProxyEditField(state: ProxyEditUiState, key: String, value: String): ProxyEditUiState {
+    if (state.saving) return state
+    val field = state.fields.firstOrNull { it.key == key } ?: return state
+    val present = field.required || value.isNotEmpty()
+    val removed = if (present) state.removedKeys - key else state.removedKeys + key
+    val changed = state.fields.map {
+        if (it.key == key) it.copy(value = value, present = present) else it
+    }
+    return state.copy(
+        // Keep cleared Advanced controls visible so a user can type a replacement
+        // without losing focus when the last character is erased.
+        fields = adaptProxyFields(state.type, changed, retainedKeys = removed),
+        removedKeys = removed,
+        error = null,
+    )
 }
 
 private data class ProxyFieldSpec(
@@ -748,7 +733,11 @@ private fun humanizeFieldPath(path: String): String = path.substringAfterLast('.
     .replaceFirstChar { it.titlecase() }
 
 /** Rebuilds the visible schema after a selector changes, without losing values. */
-internal fun adaptProxyFields(type: String, fields: List<ProxyEditField>): List<ProxyEditField> {
+internal fun adaptProxyFields(
+    type: String,
+    fields: List<ProxyEditField>,
+    retainedKeys: Set<String> = emptySet(),
+): List<ProxyEditField> {
     val oldByPath = fields.associateBy { it.key }
     // The list also contains schema controls that were never present in YAML.
     // Only present values should influence capability detection; otherwise
@@ -776,7 +765,7 @@ internal fun adaptProxyFields(type: String, fields: List<ProxyEditField>): List<
                 ),
             )
         }
-        fields.filter { it.key !in specPaths && it.present && it.key != "name" && it.key != "type" }
+        fields.filter { it.key !in specPaths && (it.present || it.key in retainedKeys) && it.key != "name" && it.key != "type" }
             // A value moved out of its active capability is optional in the
             // current schema. Keep it editable/removable in Advanced rather
             // than leaving a stale required marker from the old capability.
@@ -980,10 +969,8 @@ internal fun replaceProxyEntry(
             lines[occurrence.index] = "${occurrence.indent}${occurrence.key}: ${yamlRenderValue(value, kind)}"
         }
     }
-    // Unknown Advanced fields are intentionally removed from the form after
-    // the user taps delete. Their tombstones are therefore not present in
-    // `fields`; apply those removals separately so the original YAML cannot
-    // silently retain them.
+    // Apply explicit removals even if a capability change has removed the
+    // corresponding control, so the original YAML cannot silently retain it.
     removed.filter { it !in fields }.forEach { path ->
         val occurrence = occurrences[path] ?: return@forEach
         removedPaths += path

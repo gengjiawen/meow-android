@@ -20,7 +20,6 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Visibility
@@ -37,6 +36,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -52,7 +52,6 @@ fun ProxyEditScreen(
     state: ProxyEditUiState,
     contentPadding: PaddingValues,
     onChange: (String, String) -> Unit,
-    onRemove: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     when {
@@ -66,12 +65,12 @@ fun ProxyEditScreen(
                 mutableStateOf(setOf("Advanced"))
             }
             LazyColumn(
-                modifier = modifier.fillMaxWidth().imePadding(),
+                modifier = modifier.fillMaxSize().padding(contentPadding).imePadding().clipToBounds(),
                 contentPadding = PaddingValues(
                     start = 16.dp,
                     end = 16.dp,
-                    top = contentPadding.calculateTopPadding() + 12.dp,
-                    bottom = contentPadding.calculateBottomPadding() + 24.dp,
+                    top = 12.dp,
+                    bottom = 24.dp,
                 ),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -115,7 +114,6 @@ fun ProxyEditScreen(
                                     field = field,
                                     enabled = !state.saving,
                                     onChange = onChange,
-                                    onRemove = onRemove,
                                 )
                             }
                         }
@@ -132,7 +130,6 @@ private fun ProxyField(
     field: ProxyEditField,
     enabled: Boolean,
     onChange: (String, String) -> Unit,
-    onRemove: (String) -> Unit,
 ) {
     when (field.kind) {
         ProxyEditFieldKind.Boolean -> Row(
@@ -145,14 +142,6 @@ private fun ProxyField(
                 enabled = enabled,
                 onCheckedChange = { onChange(field.key, it.toString()) },
             )
-            if (enabled && field.present && !field.required) {
-                IconButton(onClick = { onRemove(field.key) }) {
-                    Icon(
-                        imageVector = Icons.Filled.DeleteOutline,
-                        contentDescription = "Remove ${field.label}",
-                    )
-                }
-            }
         }
         ProxyEditFieldKind.Select -> SelectField(
             field = field,
@@ -163,7 +152,6 @@ private fun ProxyField(
             field = field,
             enabled = enabled,
             onChange = onChange,
-            onRemove = onRemove,
         )
     }
 }
@@ -173,7 +161,6 @@ private fun SensitiveTextField(
     field: ProxyEditField,
     enabled: Boolean,
     onChange: (String, String) -> Unit,
-    onRemove: (String) -> Unit,
 ) {
     var revealed by remember(field.key) { mutableStateOf(!field.sensitive) }
     OutlinedTextField(
@@ -187,25 +174,14 @@ private fun SensitiveTextField(
         } else {
             VisualTransformation.None
         },
-        trailingIcon = if (field.sensitive || field.present) {
+        placeholder = if (!field.required) { { Text("Default") } } else null,
+        trailingIcon = if (field.sensitive) {
             {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (field.sensitive) {
-                        IconButton(enabled = enabled, onClick = { revealed = !revealed }) {
-                            Icon(
-                                imageVector = if (revealed) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                contentDescription = if (revealed) "Hide ${field.label}" else "Show ${field.label}",
-                            )
-                        }
-                    }
-                    if (enabled && field.present && !field.required) {
-                        IconButton(onClick = { onRemove(field.key) }) {
-                            Icon(
-                                imageVector = Icons.Filled.DeleteOutline,
-                                contentDescription = "Remove ${field.label}",
-                            )
-                        }
-                    }
+                IconButton(enabled = enabled, onClick = { revealed = !revealed }) {
+                    Icon(
+                        imageVector = if (revealed) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                        contentDescription = if (revealed) "Hide ${field.label}" else "Show ${field.label}",
+                    )
                 }
             }
         } else {

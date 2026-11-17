@@ -66,12 +66,42 @@ def by_text(text):
     return lambda n: n.get("text") == text
 
 
+def by_description(description):
+    return lambda n: n.get("content-desc") == description
+
+
 def find(root, predicate):
     return next((n for n in nodes(root) if predicate(n)), None)
 
 
 def texts(node):
     return [n.get("text", "") for n in node.iter("node") if n.get("text")]
+
+
+def bounds(node):
+    return list(map(int, re.findall(r"\d+", node.get("bounds", ""))))
+
+
+def audit_editor(root, label):
+    save = find(root, by_id("proxy_edit_save"))
+    if save is None:
+        return
+    destructive = [n.get("content-desc") for n in nodes(root)
+                   if re.search(r"\b(?:remove|delete)\b", n.get("content-desc", ""), re.I)]
+    check(not destructive, "Editor has no Remove/Delete controls: " + label)
+    toolbar_bottom = bounds(save)[3]
+    fields = [n for n in nodes(root) if n.get("resource-id", "").startswith("proxy_edit_")
+              and n.get("resource-id") not in {"proxy_edit_save", "proxy_edit_error"}
+              and len(bounds(n)) == 4 and bounds(n)[3] > bounds(n)[1]]
+    check(bool(fields) and all(bounds(n)[1] >= toolbar_bottom for n in fields),
+          "Visible editor fields stay below the app bar: " + label)
+
+
+def switch_in(field):
+    switch = find(field, lambda n: n.get("checkable") == "true")
+    if switch is None:
+        raise RuntimeError("Switch semantics missing from editor field")
+    return switch
 
 
 def wait_for(predicate, seconds=25):
@@ -86,10 +116,10 @@ def wait_for(predicate, seconds=25):
 
 
 def tap(node):
-    bounds = list(map(int, re.findall(r"\d+", node.get("bounds", ""))))
-    if len(bounds) != 4:
+    rect = bounds(node)
+    if len(rect) != 4:
         raise RuntimeError("Invalid UI bounds")
-    x1, y1, x2, y2 = bounds
+    x1, y1, x2, y2 = rect
     check(x2 > x1 and y2 > y1, "tap target has visible bounds")
     adb("shell", "input", "tap", str((x1+x2)//2), str((y1+y2)//2))
     time.sleep(0.35)
@@ -118,6 +148,8 @@ def shot(name):
     (OUT / (name + ".png")).write_bytes(data)
     root = dump()
     ET.ElementTree(root).write(OUT / (name + ".xml"), encoding="utf-8")
+    if name != "failure":
+        audit_editor(root, name)
     info("Screenshot " + name)
     return root
 
@@ -141,7 +173,7 @@ dns:
   listen: 127.0.0.1:1053
   nameserver: [1.1.1.1]
 proxies:
-  - {name: AAA Snell Editor, type: snell, server: 127.0.0.1, port: 1443, psk: synthetic-ui-test-key, version: 4, obfs-opts: {mode: http, host: synthetic.example}, dialer-proxy: Relay A}
+  - {name: AAA Snell Editor, type: snell, server: 127.0.0.1, port: 1443, psk: synthetic-ui-test-key, version: 4, udp: true, obfs-opts: {mode: http, host: synthetic.example}, dialer-proxy: Relay A}
   - name: Relay A
     type: socks5
     server: 127.0.0.1
@@ -230,6 +262,22 @@ def main():
     wait_for(by_id("proxy_edit_name"))
     shot("01-snell-editor")
 
+    scroll_to(by_id("proxy_edit_psk"))
+    tap_match(by_description("Show PSK"))
+    wait_for(by_description("Hide PSK"))
+    check("synthetic-ui-test-key" in texts(wait_for(by_id("proxy_edit_psk"))),
+          "Password eye still reveals the synthetic PSK")
+    tap_match(by_description("Hide PSK"))
+    wait_for(by_description("Show PSK"))
+    check(True, "Password eye hides the PSK again")
+
+    udp = scroll_to(by_id("proxy_edit_udp"), down=False)
+    check(switch_in(udp).get("checked") == "true", "Existing UDP option starts enabled")
+    tap(switch_in(udp))
+    check(switch_in(wait_for(by_id("proxy_edit_udp"))).get("checked") == "false",
+          "UDP option can be disabled directly with its switch")
+    shot("09-switch-and-password-controls")
+
     dialer = scroll_to(by_id("proxy_edit_dialer-proxy"))
     check("Relay A" in texts(dialer), "Dialer opens with its existing Relay A value")
     shot("02-dialer-initial-relay-a")
@@ -259,6 +307,10 @@ def main():
     tap_match(by_text("6"))
     check("6" in texts(wait_for(by_id("proxy_edit_version"))), "Snell version can change to 6")
     shot("06-snell-version-6")
+    advanced = scroll_to(by_text("Advanced"))
+    tap(advanced)
+    scroll_to(by_id("proxy_edit_obfs-opts.host"))
+    shot("10-advanced-without-delete-controls")
     tap_match(by_id("proxy_edit_save"))
     wait_for(by_id("proxy_servers_root"))
     check(True, "Saving the modified Snell proxy returns to Proxy Servers")
@@ -279,6 +331,8 @@ def main():
               "Room YAML persists dialer-proxy Relay Group")
         check(bool(re.search(r'''version:\s*['"]?6\b''', yaml)),
               "Room YAML persists Snell version 6")
+        check(bool(re.search(r'''udp:\s*false\b''', yaml)),
+              "Room YAML persists the disabled UDP option")
     adb("shell", "am", "start", "-W", "-n", PKG + "/.MainActivity", "-f", "0x10008000", "--ez", "auto_connect", "true", timeout=45)
     tap_match(by_text("Proxy Servers"))
     tap_match(by_id("proxy_servers_edit_AAA Snell Editor"))
@@ -289,6 +343,9 @@ def main():
     dialer = scroll_to(by_id("proxy_edit_dialer-proxy"))
     check("Relay Group" in texts(dialer), "Reopened editor preserves the selected Relay Group dialer")
     shot("08-reopened-dialer-relay-group")
+    udp = scroll_to(by_id("proxy_edit_udp"), down=False)
+    check(switch_in(udp).get("checked") == "false", "Reopened editor preserves the disabled UDP option")
+    shot("11-reopened-switch-and-password-controls")
     info("All required editor UI checks passed")
 
 
