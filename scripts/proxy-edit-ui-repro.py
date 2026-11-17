@@ -129,6 +129,28 @@ def tap_match(predicate):
     tap(wait_for(predicate))
 
 
+def wait_for_vpn():
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        if "inet " in adb("shell", "ip", "addr", "show", "tun0", check=False):
+            return
+        root = dump()
+        # A cold Google APIs image can show a Launcher ANR over VPN consent.
+        # Dismiss only that unrelated system app; product ANRs remain failures.
+        if find(root, by_text("Pixel Launcher isn't responding")) is not None:
+            close = find(root, by_id("android:id/aerr_close"))
+            if close is not None:
+                info("Closing emulator Pixel Launcher ANR over VPN consent")
+                tap(close)
+                continue
+        if find(root, lambda n: n.get("package") == "com.android.vpndialogs") is not None:
+            consent = find(root, by_id("android:id/button1"))
+            if consent is not None:
+                tap(consent)
+        time.sleep(0.5)
+    raise RuntimeError("Synthetic profile VPN did not start")
+
+
 def scroll_to(predicate, down=True, attempts=9):
     for _ in range(attempts):
         root = dump()
@@ -244,18 +266,7 @@ def main():
     process([ADB, "logcat", "-v", "threadtime"], "logcat.log")
     seed_profile()
     adb("shell", "am", "start", "-W", "-n", PKG + "/.MainActivity", "--ez", "auto_connect", "true", timeout=45)
-    deadline = time.monotonic() + 45
-    while time.monotonic() < deadline:
-        if "inet " in adb("shell", "ip", "addr", "show", "tun0", check=False):
-            break
-        root = dump()
-        if find(root, lambda n: n.get("package") == "com.android.vpndialogs") is not None:
-            node = find(root, by_id("android:id/button1"))
-            if node is not None:
-                tap(node)
-        time.sleep(0.5)
-    else:
-        raise RuntimeError("Synthetic profile VPN did not start")
+    wait_for_vpn()
     check(True, "Synthetic profile starts the actual VPN engine")
     tap_match(by_text("Proxy Servers"))
     tap_match(by_id("proxy_servers_edit_AAA Snell Editor"))
@@ -334,6 +345,7 @@ def main():
         check(bool(re.search(r'''udp:\s*false\b''', yaml)),
               "Room YAML persists the disabled UDP option")
     adb("shell", "am", "start", "-W", "-n", PKG + "/.MainActivity", "-f", "0x10008000", "--ez", "auto_connect", "true", timeout=45)
+    wait_for_vpn()
     tap_match(by_text("Proxy Servers"))
     tap_match(by_id("proxy_servers_edit_AAA Snell Editor"))
     wait_for(by_id("proxy_edit_name"))
