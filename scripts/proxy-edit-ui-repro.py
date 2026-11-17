@@ -258,7 +258,6 @@ def main():
     shot("05-snell-version-dropdown")
     tap_match(by_text("6"))
     check("6" in texts(wait_for(by_id("proxy_edit_version"))), "Snell version can change to 6")
-    scroll_to(by_id("proxy_edit_mode"))
     shot("06-snell-version-6")
     tap_match(by_id("proxy_edit_save"))
     wait_for(by_id("proxy_servers_root"))
