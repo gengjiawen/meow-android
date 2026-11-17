@@ -90,11 +90,12 @@ def audit_editor(root, label):
                    if re.search(r"\b(?:remove|delete)\b", n.get("content-desc", ""), re.I)]
     check(not destructive, "Editor has no Remove/Delete controls: " + label)
     toolbar_bottom = bounds(save)[3]
-    fields = [n for n in nodes(root) if n.get("resource-id", "").startswith("proxy_edit_")
-              and n.get("resource-id") not in {"proxy_edit_save", "proxy_edit_error"}
-              and len(bounds(n)) == 4 and bounds(n)[3] > bounds(n)[1]]
-    check(bool(fields) and all(bounds(n)[1] >= toolbar_bottom for n in fields),
-          "Visible editor fields stay below the app bar: " + label)
+    # Compose reports a clipped child's original bounds in accessibility XML.
+    # The scroll viewport is the rendering clip, so audit that boundary instead.
+    viewports = [n for n in nodes(root) if n.get("scrollable") == "true"
+                 and find(n, lambda c: c.get("resource-id", "").startswith("proxy_edit_")) is not None]
+    check(bool(viewports) and all(bounds(n)[1] >= toolbar_bottom for n in viewports),
+          "Editor scroll viewport stays below the app bar: " + label)
 
 
 def switch_in(field):
