@@ -8,7 +8,7 @@ name: APK
 # installing that one means uninstalling any other Meow build first.
 on:
   push:
-    branches: [master, main]
+    branches: [master, main, repro/dialer-apk-20261117]
   pull_request:
     branches: [master, main]
   workflow_dispatch:
