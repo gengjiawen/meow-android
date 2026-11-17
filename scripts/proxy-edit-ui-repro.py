@@ -245,6 +245,13 @@ def main():
           "Selecting Relay Group updates the visible dialer value")
     shot("04-dialer-selected-relay-group")
 
+    # The flow fixture starts with HTTP obfuscation, which Snell v6 correctly
+    # rejects. Turn it off through the actual form before changing versions.
+    obfs = scroll_to(by_id("proxy_edit_obfs-opts.mode"), down=False)
+    tap(obfs)
+    tap_match(by_text("off"))
+    check("off" in texts(wait_for(by_id("proxy_edit_obfs-opts.mode"))),
+          "Obfuscation can be disabled before switching to Snell v6")
     version = scroll_to(by_id("proxy_edit_version"), down=False)
     check("4" in texts(version), "Snell version initially shows 4")
     tap(version)
